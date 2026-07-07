@@ -6,14 +6,15 @@ Logispot AWS 인프라 모니터링 MCP 서버.
 
 ```
 mcp-aws-monitor/
-├── .env                ← AWS 인증 키 (git 미추적)
+├── .env                ← AWS 키 + Google OAuth 키 (git 미추적)
 ├── .env.example        ← .env 템플릿
 ├── .gitignore
-├── pyproject.toml      ← 패키지 정의 (mcp, boto3, python-dotenv)
+├── pyproject.toml      ← 패키지 정의 (mcp, boto3, httpx, uvicorn 등)
 ├── README.md
 └── src/
     ├── __init__.py
-    ├── server.py       ← MCP 서버 진입점
+    ├── server.py       ← MCP 서버 진입점 (stdio / HTTP 모드)
+    ├── google_oauth.py ← Google OAuth Provider (HTTP 모드용)
     ├── aws_client.py   ← boto3 클라이언트 팩토리 (lru_cache)
     ├── cloudwatch.py   ← CloudWatch 도구 4개
     ├── sqs.py          ← SQS 도구 3개
@@ -22,9 +23,109 @@ mcp-aws-monitor/
     └── ec2.py          ← EC2/ECS/AutoScaling 도구 5개
 ```
 
+## 연동 방식
+
+두 가지 방식으로 Claude Code와 연동할 수 있다.
+
+### 방식 1: stdio (로컬 전용)
+
+Claude Code가 MCP 서버를 자식 프로세스로 직접 실행하는 방식.
+같은 머신에서만 사용 가능하고, 별도 인증 없음.
+
+```
+Claude Code --stdio--> MCP 서버 (자식 프로세스)
+```
+
+**실행 방법**:
+1. Claude Code 설정을 stdio로 변경 (아래 참고)
+2. Claude Code 시작하면 자동 실행 (서버를 따로 켤 필요 없음)
+
+**Claude Code 설정** (`~/.claude.json` 또는 `~/.claude/.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "aws-monitor": {
+      "command": "/path/to/mcp-aws-monitor/.venv/bin/python",
+      "args": ["-m", "src.server"],
+      "cwd": "/path/to/mcp-aws-monitor"
+    }
+  }
+}
+```
+
+등록 CLI:
+```bash
+claude mcp add aws-monitor -s user -- /path/to/mcp-aws-monitor/.venv/bin/python -m src.server
+```
+
+### 방식 2: HTTP + Google OAuth (원격/다중 사용자)
+
+MCP 서버를 독립 HTTP 서버로 실행하고, Google OAuth로 인증하는 방식.
+서버를 EC2 등에 배포하면 팀원들이 공유해서 사용할 수 있다.
+
+```
+Claude Code --HTTP--> MCP 서버 (:8000)
+                        ↓ (인증 필요)
+                      브라우저 → Google 로그인
+                        ↓ (로그인 완료)
+                      /google/callback → MCP 토큰 발급
+                        ↓
+                      Claude Code가 토큰으로 MCP 도구 사용
+```
+
+**사전 준비**:
+
+1. Google Cloud Console에서 OAuth 클라이언트 생성
+   - `API 및 서비스` → `OAuth 동의 화면` → User Type: 내부 (Workspace 조직만 허용)
+   - `사용자 인증 정보` → `OAuth 클라이언트 ID` → 웹 애플리케이션
+   - 승인된 리디렉션 URI: `http://{서버주소}:8000/google/callback`
+2. `.env`에 추가:
+   ```
+   GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
+   GOOGLE_CLIENT_SECRET=GOCSPX-xxx
+   MCP_SERVER_URL=http://localhost:8000   # 배포 시 실제 서버 URL로 변경
+   ```
+
+**실행 방법**:
+1. Claude Code 설정을 http로 변경 (아래 참고)
+2. MCP 서버를 직접 실행:
+   ```bash
+   cd /path/to/mcp-aws-monitor
+   .venv/bin/python -m src.server --http
+   # Uvicorn running on http://0.0.0.0:8000
+   ```
+3. Claude Code 시작 (또는 재시작)
+4. MCP 도구 호출 시 브라우저가 열리고, Google 로그인 완료 후 자동 인증됨
+
+서버 종료: `Ctrl+C`
+
+**Claude Code 설정** (`~/.claude.json` 또는 `~/.claude/.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "aws-monitor": {
+      "type": "http",
+      "url": "http://localhost:8000/mcp"
+    }
+  }
+}
+```
+
+등록 CLI:
+```bash
+claude mcp add --transport http -s user aws-monitor http://localhost:8000/mcp
+```
+
+**주의사항**:
+- Google OAuth 동의 화면을 "내부"로 설정하면 같은 Google Workspace 조직 계정만 접근 가능
+- 토큰은 인메모리 저장이므로 서버 재시작 시 재로그인 필요
+- `localhost`는 본인 머신에서만 접근 가능. 팀 공유 시 서버 배포 필요
+
 ## 아키텍처
 
-### 동작 흐름
+### 동작 흐름 (stdio)
 
 ```
 Claude Code 세션 시작
@@ -33,6 +134,17 @@ Claude Code 세션 시작
     → FastMCP 인스턴스 생성
     → 각 모듈의 register_tools()로 도구 19개 등록
     → stdio 기반으로 Claude Code와 통신
+```
+
+### 동작 흐름 (HTTP + Google OAuth)
+
+```
+MCP 서버 실행 (uvicorn :8000)
+  → .env에서 AWS 키 + Google OAuth 키 로드
+  → FastMCP 인스턴스 생성 (AuthSettings 포함)
+  → OAuth 엔드포인트 자동 마운트 (/authorize, /token, /register, /revoke)
+  → /google/callback 라우트 추가
+  → /mcp 엔드포인트에서 인증된 요청만 도구 실행
 ```
 
 ### aws_client.py
@@ -202,35 +314,21 @@ pip install -e .
 
 ## 설정
 
-`.env` 파일에 AWS 키 입력:
+`.env` 파일에 필요한 키 입력:
 
 ```
+# AWS (필수)
 AWS_ACCESS_KEY_ID=your-key
 AWS_SECRET_ACCESS_KEY=your-secret
 AWS_DEFAULT_REGION=ap-northeast-2
+
+# Google OAuth (HTTP 모드 사용 시)
+GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-xxx
+MCP_SERVER_URL=http://localhost:8000
 ```
 
-## Claude Code 연동
-
-```bash
-claude mcp add aws-monitor -s user -- /Users/hbmun/work/mcp-aws-monitor/.venv/bin/python -m src.server
-```
-
-또는 수동으로 `~/.claude.json`에 추가됨:
-
-```json
-{
-  "mcpServers": {
-    "aws-monitor": {
-      "command": "/Users/hbmun/work/mcp-aws-monitor/.venv/bin/python",
-      "args": ["-m", "src.server"],
-      "cwd": "/Users/hbmun/work/mcp-aws-monitor"
-    }
-  }
-}
-```
-
-등록 후 Claude Code 재시작 필요.
+Claude Code 연동 방법은 위 [연동 방식](#연동-방식) 섹션 참고.
 
 ## IAM 권한
 
