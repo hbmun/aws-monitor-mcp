@@ -20,7 +20,9 @@ mcp-aws-monitor/
     ├── sqs.py          ← SQS 도구 3개
     ├── rds.py          ← RDS 도구 3개
     ├── s3.py           ← S3 도구 4개
-    └── ec2.py          ← EC2/ECS/AutoScaling 도구 5개
+    ├── ec2.py          ← EC2/ECS/AutoScaling 도구 5개
+    ├── sns.py          ← SNS 도구 2개
+    └── lambda_tools.py ← Lambda 도구 3개
 ```
 
 ## 연동 방식
@@ -132,7 +134,7 @@ Claude Code 세션 시작
   → MCP 서버 프로세스 실행 (src/server.py)
     → .env에서 AWS 키 로드 (python-dotenv)
     → FastMCP 인스턴스 생성
-    → 각 모듈의 register_tools()로 도구 19개 등록
+    → 각 모듈의 register_tools()로 도구 24개 등록
     → stdio 기반으로 Claude Code와 통신
 ```
 
@@ -162,7 +164,7 @@ boto3 클라이언트를 `lru_cache`로 캐싱하는 팩토리.
 
 MCP 도구는 반환값이 문자열이어야 하므로 전부 `-> str`.
 
-## 제공 도구 (19개)
+## 제공 도구 (24개)
 
 ### CloudWatch (4개)
 
@@ -303,6 +305,36 @@ Auto Scaling 그룹 목록 및 현황 조회.
 - 파라미터 없음
 - 그룹별 인스턴스 수, Min/Max/Desired 설정, 헬스체크 타입 표시
 
+### SNS (2개)
+
+#### `sns_list_topics`
+SNS 토픽 목록 조회.
+- 파라미터 없음
+- 토픽 이름, ARN 표시
+
+#### `sns_get_topic_subscriptions`
+SNS 토픽의 구독 목록 조회.
+- `topic_arn` (str): 토픽 ARN (예: arn:aws:sns:ap-northeast-2:123456:my-topic)
+- 구독별 Protocol, Endpoint, SubscriptionArn 표시
+
+### Lambda (3개)
+
+#### `lambda_list_functions`
+Lambda 함수 목록 조회.
+- 파라미터 없음
+- 함수명, Runtime, Description, LastModified 표시
+
+#### `lambda_get_function`
+Lambda 함수 상세 정보 조회.
+- `function_name` (str): 함수 이름 또는 ARN
+- 설정 정보 (Runtime, Handler, Memory, Timeout), 환경변수 키, 이벤트 소스 매핑, 리소스 정책 표시
+
+#### `lambda_get_code`
+Lambda 함수 소스 코드 조회.
+- `function_name` (str): 함수 이름 또는 ARN
+- 배포 패키지를 다운로드해서 소스 파일(.py, .js, .ts, .json 등) 내용 표시
+- node_modules, __pycache__ 등 의존성 디렉토리 제외
+
 ## 설치
 
 ```bash
@@ -356,7 +388,12 @@ IAM 유저 생성 시 아래 인라인 정책 연결:
         "ec2:Describe*",
         "ecs:List*",
         "ecs:Describe*",
-        "autoscaling:Describe*"
+        "autoscaling:Describe*",
+        "lambda:List*",
+        "lambda:Get*",
+        "lambda:GetPolicy",
+        "sns:List*",
+        "sns:Get*"
       ],
       "Resource": "*"
     }

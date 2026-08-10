@@ -18,11 +18,15 @@ def register_tools(mcp: FastMCP):
         alarms = client.describe_alarms(**kwargs)
         results = []
         for alarm in alarms.get("MetricAlarms", []):
-            results.append(
+            line = (
                 f"[{alarm['StateValue']}] {alarm['AlarmName']}\n"
                 f"  Metric: {alarm.get('Namespace','')}/{alarm.get('MetricName','')}\n"
                 f"  Reason: {alarm.get('StateReason','')[:200]}"
             )
+            actions = alarm.get("AlarmActions", []) + alarm.get("OKActions", []) + alarm.get("InsufficientDataActions", [])
+            if actions:
+                line += f"\n  Actions: {', '.join(actions)}"
+            results.append(line)
         for alarm in alarms.get("CompositeAlarms", []):
             results.append(
                 f"[{alarm['StateValue']}] {alarm['AlarmName']} (composite)\n"

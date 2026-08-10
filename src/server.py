@@ -49,12 +49,16 @@ from src.sqs import register_tools as register_sqs
 from src.rds import register_tools as register_rds
 from src.s3 import register_tools as register_s3
 from src.ec2 import register_tools as register_ec2
+from src.sns import register_tools as register_sns
+from src.lambda_tools import register_tools as register_lambda
 
 register_cloudwatch(mcp)
 register_sqs(mcp)
 register_rds(mcp)
 register_s3(mcp)
 register_ec2(mcp)
+register_sns(mcp)
+register_lambda(mcp)
 
 
 def main():
