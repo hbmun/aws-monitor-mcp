@@ -53,25 +53,35 @@ def register_tools(mcp: FastMCP):
         start = end - timedelta(hours=hours)
         period = max(300, (hours * 3600) // 60)  # 최소 5분, 최대 60 데이터포인트
 
-        resp = client.get_metric_statistics(
-            Namespace=namespace,
-            MetricName=metric_name,
-            Dimensions=[{"Name": dimension_name, "Value": dimension_value}],
+        resp = client.get_metric_data(
+            MetricDataQueries=[
+                {
+                    "Id": "m1",
+                    "MetricStat": {
+                        "Metric": {
+                            "Namespace": namespace,
+                            "MetricName": metric_name,
+                            "Dimensions": [{"Name": dimension_name, "Value": dimension_value}],
+                        },
+                        "Period": period,
+                        "Stat": stat,
+                    },
+                }
+            ],
             StartTime=start,
             EndTime=end,
-            Period=period,
-            Statistics=[stat],
         )
-        datapoints = sorted(resp["Datapoints"], key=lambda x: x["Timestamp"])
-        if not datapoints:
+        results = resp.get("MetricDataResults", [])
+        if not results or not results[0].get("Timestamps"):
             return "데이터 없음"
 
+        timestamps = results[0]["Timestamps"]
+        values = results[0]["Values"]
+        pairs = sorted(zip(timestamps, values), key=lambda x: x[0])
+
         lines = [f"{namespace}/{metric_name} ({stat}, 최근 {hours}시간)"]
-        for dp in datapoints:
-            ts = dp["Timestamp"].strftime("%H:%M")
-            val = dp[stat]
-            unit = dp.get("Unit", "")
-            lines.append(f"  {ts}: {val:.2f} {unit}")
+        for ts, val in pairs:
+            lines.append(f"  {ts.strftime('%H:%M')}: {val:.2f}")
         return "\n".join(lines)
 
     @mcp.tool()
