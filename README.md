@@ -22,7 +22,14 @@ mcp-aws-monitor/
     ├── s3.py           ← S3 도구 4개
     ├── ec2.py          ← EC2/ECS/AutoScaling 도구 5개
     ├── sns.py          ← SNS 도구 2개
-    └── lambda_tools.py ← Lambda 도구 3개
+    ├── lambda_tools.py ← Lambda 도구 3개
+    ├── vpc.py          ← VPC/보안그룹 도구 3개
+    ├── route53.py      ← Route53 도구 2개
+    ├── cloudfront.py   ← CloudFront 도구 1개
+    ├── elb.py          ← ALB/NLB 도구 2개
+    ├── elasticache.py  ← ElastiCache 도구 1개
+    ├── acm.py          ← ACM 도구 1개
+    └── cost.py         ← Cost Explorer 도구 2개
 ```
 
 ## 연동 방식
@@ -164,7 +171,7 @@ boto3 클라이언트를 `lru_cache`로 캐싱하는 팩토리.
 
 MCP 도구는 반환값이 문자열이어야 하므로 전부 `-> str`.
 
-## 제공 도구 (24개)
+## 제공 도구 (36개)
 
 ### CloudWatch (4개)
 
@@ -335,6 +342,87 @@ Lambda 함수 소스 코드 조회.
 - 배포 패키지를 다운로드해서 소스 파일(.py, .js, .ts, .json 등) 내용 표시
 - node_modules, __pycache__ 등 의존성 디렉토리 제외
 
+### VPC / 보안그룹 (3개)
+
+#### `vpc_list`
+VPC 및 서브넷 목록 조회.
+- 파라미터 없음
+- VPC별 CIDR, Default 여부, 서브넷(AZ, CIDR, Public IP 자동할당 여부) 표시
+
+#### `vpc_list_security_groups`
+보안그룹 목록 및 인바운드 규칙 조회.
+- `open_to_world_only` (bool, 기본 False): True면 0.0.0.0/0 또는 ::/0 인바운드 규칙이 있는 그룹만 표시
+- 규칙은 `프로토콜/포트 <- 소스(CIDR/보안그룹/PrefixList)` 형식
+
+#### `vpc_get_security_group`
+보안그룹 상세 조회.
+- `group_id` (str): 보안그룹 ID
+- 인바운드/아웃바운드 규칙 + 이 그룹이 붙어있는 ENI(인스턴스 ID, Public IP) 표시
+- 연결된 리소스가 없으면 "미사용" 표시
+
+### Route53 (2개)
+
+#### `route53_list_zones`
+호스팅 존 목록 조회.
+- 파라미터 없음
+- 존 이름, ID, Private 여부, 레코드 수 표시
+
+#### `route53_list_records`
+호스팅 존의 레코드 목록 조회.
+- `zone_id` (str): 호스팅 존 ID
+- `name_filter` (str, 선택): 레코드 이름 포함 문자열 필터
+- ALIAS 레코드는 대상 DNS 표시
+
+### CloudFront (1개)
+
+#### `cloudfront_list_distributions`
+CloudFront 배포 목록 조회.
+- 파라미터 없음
+- 배포 ID, 도메인, Aliases, Origins, 상태, 인증서 표시
+
+### ALB / NLB (2개)
+
+#### `elb_list_load_balancers`
+로드밸런서 목록 및 리스너 조회.
+- 파라미터 없음
+- 타입, Scheme, DNS, AZ, 보안그룹, 리스너(프로토콜:포트 → 액션) 표시
+
+#### `elb_list_target_groups`
+타겟그룹 목록과 타겟 헬스 상태 조회.
+- 파라미터 없음
+- 연결된 로드밸런서, 헬스체크 경로, 타겟별 healthy/unhealthy 표시
+
+### ElastiCache (1개)
+
+#### `elasticache_list`
+ElastiCache 목록 조회.
+- 파라미터 없음
+- Serverless 캐시(엔진, Endpoint, 사용 한도)와 노드 기반 클러스터 모두 표시
+
+### ACM (1개)
+
+#### `acm_list_certificates`
+ACM 인증서 목록 조회.
+- 파라미터 없음
+- 기본 리전 + us-east-1(CloudFront용) 함께 조회
+- 도메인, 상태(ISSUED/EXPIRED 등), 만료일, 사용 여부 표시
+
+### Cost Explorer (2개)
+
+Cost Explorer API는 **호출당 $0.01 과금**된다. 비용 값은 UnblendedCost(USD).
+
+#### `cost_by_service`
+서비스별 월 비용 조회.
+- `months` (int, 기본 2): 이번 달 포함 최근 N개월. 이번 달은 어제까지 집계
+- `min_amount` (float, 기본 1.0): 이 금액 미만 서비스는 숨김 (합계에는 포함)
+- 월별 합계 + 금액 내림차순 서비스 목록 표시
+
+#### `cost_by_usage_type`
+특정 서비스의 사용 유형별 월 비용 조회 (예: CloudFront 데이터 전송 vs 요청 수).
+- `service` (str): `cost_by_service` 결과의 서비스명 그대로 (예: Amazon CloudFront)
+- `months` (int, 기본 1): 이번 달 포함 최근 N개월
+- `min_amount` (float, 기본 0.01): 이 금액 미만 항목은 숨김 (합계에는 포함)
+
 ## 설치
 
 ```bash
@@ -393,7 +481,16 @@ IAM 유저 생성 시 아래 인라인 정책 연결:
         "lambda:Get*",
         "lambda:GetPolicy",
         "sns:List*",
-        "sns:Get*"
+        "sns:Get*",
+        "route53:List*",
+        "route53:Get*",
+        "cloudfront:List*",
+        "cloudfront:Get*",
+        "elasticloadbalancing:Describe*",
+        "elasticache:Describe*",
+        "acm:List*",
+        "acm:Describe*",
+        "ce:GetCostAndUsage"
       ],
       "Resource": "*"
     }
@@ -408,7 +505,7 @@ IAM 유저 생성 시 아래 인라인 정책 연결:
 
 ## 알려진 제한사항
 
-- 단일 리전(ap-northeast-2)만 지원. 다중 리전 조회 불가
+- 단일 리전(ap-northeast-2)만 지원. 다중 리전 조회 불가 (예외: `acm_list_certificates`는 us-east-1도 함께 조회)
 - EC2, RDS, AutoScaling 목록 조회 시 첫 페이지만 반환 (대량 리소스 시 잘림)
 - `s3_list_objects`는 S3 기본 정렬 후 limit 적용이라 진짜 최신 N개가 아닐 수 있음
 - `cloudwatch_search_logs` 쿼리가 30초 내 완료되지 않으면 불완전한 결과 반환 가능

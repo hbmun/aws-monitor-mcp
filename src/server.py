@@ -51,6 +51,13 @@ from src.s3 import register_tools as register_s3
 from src.ec2 import register_tools as register_ec2
 from src.sns import register_tools as register_sns
 from src.lambda_tools import register_tools as register_lambda
+from src.vpc import register_tools as register_vpc
+from src.route53 import register_tools as register_route53
+from src.cloudfront import register_tools as register_cloudfront
+from src.elb import register_tools as register_elb
+from src.elasticache import register_tools as register_elasticache
+from src.acm import register_tools as register_acm
+from src.cost import register_tools as register_cost
 
 register_cloudwatch(mcp)
 register_sqs(mcp)
@@ -59,6 +66,13 @@ register_s3(mcp)
 register_ec2(mcp)
 register_sns(mcp)
 register_lambda(mcp)
+register_vpc(mcp)
+register_route53(mcp)
+register_cloudfront(mcp)
+register_elb(mcp)
+register_elasticache(mcp)
+register_acm(mcp)
+register_cost(mcp)
 
 
 def main():
